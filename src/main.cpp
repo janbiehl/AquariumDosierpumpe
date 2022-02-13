@@ -13,8 +13,6 @@
 #include "esp_smartconfig.h"
 
 #include "mqtt_client.h"
-
-#include "WebServer.h"
 #include "esp_smartconfig.h"
 
 /* FreeRTOS event group to signal, when we are connected & ready to make a request */
@@ -27,38 +25,52 @@ static const int CONNECTED_BIT = BIT0;
 static const int ESPTOUCH_DONE_BIT = BIT1;
 static const char *TAG = "Dosierpumpe";
 
-static uint8_t* mac_address;
+static bool wifiConnected = false;
 
-static void smartconfig_task(void * parm);
+static uint8_t *mac_address;
 
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                                int32_t event_id, void* event_data)
+static void smartconfig_task(void *parm);
+
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
+    {
         xTaskCreate(smartconfig_task, "smartconfig_task", 4096, NULL, 3, NULL);
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
         esp_wifi_connect();
         xEventGroupClearBits(s_wifi_event_group, CONNECTED_BIT);
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    }
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+    {
         xEventGroupSetBits(s_wifi_event_group, CONNECTED_BIT);
-    } else if (event_base == SC_EVENT && event_id == SC_EVENT_SCAN_DONE) {
+    }
+    else if (event_base == SC_EVENT && event_id == SC_EVENT_SCAN_DONE)
+    {
         ESP_LOGI(TAG, "Scan done");
-    } else if (event_base == SC_EVENT && event_id == SC_EVENT_FOUND_CHANNEL) {
+    }
+    else if (event_base == SC_EVENT && event_id == SC_EVENT_FOUND_CHANNEL)
+    {
         ESP_LOGI(TAG, "Found channel");
-    } else if (event_base == SC_EVENT && event_id == SC_EVENT_GOT_SSID_PSWD) {
+    }
+    else if (event_base == SC_EVENT && event_id == SC_EVENT_GOT_SSID_PSWD)
+    {
         ESP_LOGI(TAG, "Got SSID and password");
 
         smartconfig_event_got_ssid_pswd_t *evt = (smartconfig_event_got_ssid_pswd_t *)event_data;
         wifi_config_t wifi_config;
-        uint8_t ssid[33] = { 0 };
-        uint8_t password[65] = { 0 };
-        uint8_t rvd_data[33] = { 0 };
+        uint8_t ssid[33] = {0};
+        uint8_t password[65] = {0};
+        uint8_t rvd_data[33] = {0};
 
         bzero(&wifi_config, sizeof(wifi_config_t));
         memcpy(wifi_config.sta.ssid, evt->ssid, sizeof(wifi_config.sta.ssid));
         memcpy(wifi_config.sta.password, evt->password, sizeof(wifi_config.sta.password));
         wifi_config.sta.bssid_set = evt->bssid_set;
-        if (wifi_config.sta.bssid_set == true) {
+        if (wifi_config.sta.bssid_set == true)
+        {
             memcpy(wifi_config.sta.bssid, evt->bssid, sizeof(wifi_config.sta.bssid));
         }
 
@@ -66,19 +78,23 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         memcpy(password, evt->password, sizeof(evt->password));
         ESP_LOGI(TAG, "SSID:%s", ssid);
         ESP_LOGI(TAG, "PASSWORD:%s", password);
-        if (evt->type == SC_TYPE_ESPTOUCH_V2) {
-            ESP_ERROR_CHECK( esp_smartconfig_get_rvd_data(rvd_data, sizeof(rvd_data)) );
+        if (evt->type == SC_TYPE_ESPTOUCH_V2)
+        {
+            ESP_ERROR_CHECK(esp_smartconfig_get_rvd_data(rvd_data, sizeof(rvd_data)));
             ESP_LOGI(TAG, "RVD_DATA:");
-            for (int i=0; i<33; i++) {
+            for (int i = 0; i < 33; i++)
+            {
                 printf("%02x ", rvd_data[i]);
             }
             printf("\n");
         }
 
-        ESP_ERROR_CHECK( esp_wifi_disconnect() );
-        ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
+        ESP_ERROR_CHECK(esp_wifi_disconnect());
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
         esp_wifi_connect();
-    } else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE) {
+    }
+    else if (event_base == SC_EVENT && event_id == SC_EVENT_SEND_ACK_DONE)
+    {
         xEventGroupSetBits(s_wifi_event_group, ESPTOUCH_DONE_BIT);
     }
 }
@@ -86,11 +102,11 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%d", base, event_id);
-    esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t) event_data;
+    esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
 
-    switch ((esp_mqtt_event_id_t) event_id)
+    switch ((esp_mqtt_event_id_t)event_id)
     {
     case MQTT_EVENT_BEFORE_CONNECT:
         ESP_LOGI(TAG, "MQTT before connect event");
@@ -99,7 +115,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         ESP_LOGI(TAG, "MQTT connected event");
 
         // here we got a connection with a broker, we can start listening for something
-        msg_id = esp_mqtt_client_subscribe(client, "homeassistant/switch/ABDCE", 0);
+        msg_id = esp_mqtt_client_subscribe(client, "homeassistant/switch/ABDCE/config", 0);
         ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
         break;
@@ -122,7 +138,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
         printf("DATA=%.*s\r\n", event->data_len, event->data);
-        if (strncmp(event->data, "send binary please", event->data_len) == 0) {
+        if (strncmp(event->data, "send binary please", event->data_len) == 0)
+        {
             ESP_LOGI(TAG, "Sending the binary");
         }
 
@@ -132,38 +149,42 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_DELETED:
         ESP_LOGI(TAG, "MQTT deleted event");
-        break;  
+        break;
 
-    default: 
+    default:
         ESP_LOGI(TAG, "Unhandeled mqtt event");
         break;
     }
 }
 
-static void smartconfig_task(void * parm)
+static void smartconfig_task(void *parm)
 {
     EventBits_t uxBits;
-    ESP_ERROR_CHECK( esp_smartconfig_set_type(SC_TYPE_ESPTOUCH) );
+    ESP_ERROR_CHECK(esp_smartconfig_set_type(SC_TYPE_ESPTOUCH));
     smartconfig_start_config_t cfg = SMARTCONFIG_START_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_smartconfig_start(&cfg) );
-    while (1) {
+    ESP_ERROR_CHECK(esp_smartconfig_start(&cfg));
+    while (1)
+    {
         uxBits = xEventGroupWaitBits(s_wifi_event_group, CONNECTED_BIT | ESPTOUCH_DONE_BIT, true, false, portMAX_DELAY);
-        if(uxBits & CONNECTED_BIT) {
+        if (uxBits & CONNECTED_BIT)
+        {
             ESP_LOGI(TAG, "WiFi Connected to ap");
+            wifiConnected = true;
         }
-        if(uxBits & ESPTOUCH_DONE_BIT) {
+        if (uxBits & ESPTOUCH_DONE_BIT)
+        {
             ESP_LOGI(TAG, "smartconfig over");
             esp_smartconfig_stop();
+            // NULL will cause this task to be deleted
             vTaskDelete(NULL);
         }
     }
 }
 
-WebServer* _webServer = new WebServer();
-
-void initializeWifi() {
+void initializeWifi()
+{
     s_wifi_event_group = xEventGroupCreate();
-    esp_netif_t* sta_netif = esp_netif_create_default_wifi_sta();
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
     assert(sta_netif);
 
     wifi_init_config_t config = WIFI_INIT_CONFIG_DEFAULT();
@@ -177,18 +198,24 @@ void initializeWifi() {
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-void initializeMqtt() {
+void initializeMqtt()
+{
     // TODO: remove this literals
     esp_mqtt_client_config_t mqtt_config = esp_mqtt_client_config_t();
     mqtt_config.uri = "http://192.168.10.56:8883";
 
     esp_mqtt_client_handle_t client = esp_mqtt_client_handle_t(&mqtt_config);
-    esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, &mqtt_event_handler, NULL);
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, &mqtt_event_handler, NULL);
 
-    ESP_ERROR_CHECK(esp_mqtt_client_start(client));
+    // ESP_ERROR_CHECK(esp_mqtt_client_start(client));
 }
 
-extern "C" void app_main() {
+extern "C" void app_main()
+{
+    // #if DEBUG
+    //     esp_log_level_set(TAG, ESP_LOG_VERBOSE);
+    // #endif
+
     // read and store the mac address
     esp_efuse_mac_get_default(mac_address);
 
@@ -197,19 +224,29 @@ extern "C" void app_main() {
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    ESP_LOGV(TAG, "System init done, starting user init");
 
     initializeWifi();
+
+    ESP_LOGV(TAG, "waiting for wifi connection");
+
+    while (wifiConnected == false)
+    {
+        sys_delay_ms(1000);
+    }
+
+    ESP_LOGV(TAG, "Wifi connected, moving forward to MQTT");
+
     initializeMqtt();
 
-    //configureMqttAutodiscover();
-    
+    // configureMqttAutodiscover();
 
     //_webServer->startWebserver(nullptr);
 
-    //while (true)
+    // while (true)
     //{
-    //    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    //}
-    
+    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // }
+
     //_webServer->stopWebserver();
 }
